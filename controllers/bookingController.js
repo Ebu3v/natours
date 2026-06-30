@@ -42,24 +42,19 @@ exports.getCheckoutSession = catchAsync(async (req, res, next) => {
   });
 });
 
-// exports.createBookingCheckout = catchAsync(async (req, res, next) => {
-//   // This is only TEMPORARY, because it's UNSECURE: everyone can make bookings without paying
-//   const { tour, user, price } = req.query;
-
-//   if (!tour && !user && !price) return next();
-//   await Booking.create({ tour, user, price });
-
-//   res.redirect(req.originalUrl.split('?')[0]);
-// });
-
 const createBookingCheckout = async (session) => {
-  const tour = session.client_reference_id;
-  const user = (await User.findOne({ email: session.customer_email })).id;
-  const price = session.line_items[0].unit_amount / 100;
-  await Booking.create({ tour, user, price });
+  try {
+    const tour = session.client_reference_id;
+    const user = (await User.findOne({ email: session.customer_email })).id;
+    const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
+    const price = lineItems.data[0].amount_total / 100;
+    await Booking.create({ tour, user, price });
+  } catch (err) {
+    console.error(err.message);
+  }
 };
 
-exports.webhookCheckout = (req, res, next) => {
+exports.webhookCheckout = catchAsync(async (req, res, next) => {
   const signature = req.headers['stripe-signature'];
 
   let event;
@@ -74,10 +69,10 @@ exports.webhookCheckout = (req, res, next) => {
   }
 
   if (event.type === 'checkout.session.completed')
-    createBookingCheckout(event.data.object);
+    await createBookingCheckout(event.data.object);
 
   res.status(200).json({ received: true });
-};
+});
 
 exports.createBooking = factory.createOne(Booking);
 exports.getBooking = factory.getOne(Booking);
